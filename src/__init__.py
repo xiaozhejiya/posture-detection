@@ -1,0 +1,2 @@
+"""Posture detection MVP package."""
+
