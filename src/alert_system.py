@@ -11,7 +11,7 @@ class AlertSystem:
         self.last_alert_time = -1e9
 
     def update(self, analysis: PostureAnalysis) -> AlertEvent:
-        if analysis.status in {"normal", "invalid"}:
+        if analysis.status in {"normal", "invalid", "calibrating"}:
             return AlertEvent(False, analysis.status, "", analysis.timestamp)
 
         if analysis.timestamp - self.last_alert_time < self.cooldown_sec:
@@ -19,4 +19,3 @@ class AlertSystem:
 
         self.last_alert_time = analysis.timestamp
         return AlertEvent(True, analysis.status, analysis.message, analysis.timestamp)
-

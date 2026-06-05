@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rtsp-url", help="Override RTSP URL.")
     parser.add_argument("--video-file", help="Override local video file.")
     parser.add_argument("--no-window", action="store_true", help="Disable OpenCV display window.")
+    parser.add_argument("--calibrate-on-start", action="store_true", help="Start upper-body calibration on startup.")
     parser.add_argument("--max-frames", type=int, help="Stop after this many frames; useful for smoke tests.")
     return parser.parse_args()
 
@@ -84,6 +85,9 @@ def main() -> int:
 
     try:
         source.open()
+        if args.calibrate_on_start or bool(config["app"].get("calibrate_on_start", False)):
+            analyzer.start_calibration(time.monotonic())
+            print("[INFO] Upper-body calibration started. Keep a normal sitting posture.")
         while True:
             frame, timestamp = source.read()
             if frame is None:
@@ -108,6 +112,9 @@ def main() -> int:
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     break
+                if key == ord("c"):
+                    analyzer.start_calibration(timestamp)
+                    print("[INFO] Upper-body calibration started. Keep a normal sitting posture.")
 
             frame_count += 1
             if args.max_frames is not None and frame_count >= args.max_frames:
@@ -127,4 +134,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -77,13 +77,20 @@ class PostureAnalysis:
     status: str
     head_angle_deg: Optional[float] = None
     trunk_angle_deg: Optional[float] = None
+    upper_body_score: Optional[float] = None
     smoothed_head_angle_deg: Optional[float] = None
     smoothed_trunk_angle_deg: Optional[float] = None
+    smoothed_upper_body_score: Optional[float] = None
     head_warning_duration_sec: float = 0.0
     trunk_warning_duration_sec: float = 0.0
     combined_warning_duration_sec: float = 0.0
     confidence: float = 0.0
     detected: bool = False
+    calibrated: bool = False
+    calibrating: bool = False
+    calibration_progress: float = 0.0
+    calibration_sample_count: int = 0
+    trunk_signal: str = "none"
     flags: Dict[str, bool] = field(default_factory=dict)
     message: str = ""
 
@@ -95,4 +102,3 @@ class AlertEvent:
     message: str
     timestamp: float
     cooling_down: bool = False
-

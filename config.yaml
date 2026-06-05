@@ -2,6 +2,7 @@ app:
   name: "Posture Detection MVP"
   debug: true
   show_window: true
+  calibrate_on_start: false
 
 video_source:
   type: "usb"
@@ -26,16 +27,30 @@ pose:
   use_face_landmarker: false
 
 posture_rule:
+  trunk_mode: "auto"
   min_visibility: 0.5
+  trunk_min_visibility: 0.2
   head_expected_gap_ratio: 0.55
 
   head_down_mild_deg: 15
   head_down_warning_deg: 25
   head_down_severe_deg: 35
 
-  trunk_flex_mild_deg: 15
-  trunk_flex_warning_deg: 25
-  trunk_flex_severe_deg: 35
+  trunk_flex_mild_deg: 12
+  trunk_flex_warning_deg: 20
+  trunk_flex_severe_deg: 32
+
+  upper_body_calibration_sec: 8.0
+  upper_body_min_samples: 20
+  upper_body_mild_score: 40
+  upper_body_warning_score: 60
+  upper_body_severe_score: 80
+  upper_body_weights:
+    neck_angle: 0.30
+    head_shoulder_gap: 0.25
+    head_shift: 0.20
+    shoulder_shift: 0.15
+    arm_posture: 0.10
 
   smoothing_window_sec: 1.0
   warning_duration_sec: 3.0
@@ -55,3 +70,5 @@ logging:
   log_dir: "data/logs"
   format: "csv"
   write_each_frame: true
+  enable_event_log: true
+  event_log_prefix: "posture_events"

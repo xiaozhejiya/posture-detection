@@ -13,6 +13,7 @@ def make_pose(
     right_shoulder=(0.58, 0.40),
     left_hip=(0.43, 0.70),
     right_hip=(0.57, 0.70),
+    hip_visibility=0.99,
 ) -> PoseResult:
     landmarks = [Landmark(0.0, 0.0, visibility=0.0) for _ in range(33)]
     for index, point in (
@@ -23,6 +24,8 @@ def make_pose(
         (PoseIndex.RIGHT_HIP, right_hip),
     ):
         landmarks[index] = Landmark(point[0], point[1], visibility=0.99)
+    landmarks[PoseIndex.LEFT_HIP] = Landmark(left_hip[0], left_hip[1], visibility=hip_visibility)
+    landmarks[PoseIndex.RIGHT_HIP] = Landmark(right_hip[0], right_hip[1], visibility=hip_visibility)
     return PoseResult(landmarks=landmarks, valid=True, min_visibility=0.99)
 
 
@@ -60,6 +63,52 @@ class PostureAnalyzerTest(unittest.TestCase):
         analyzer.analyze(pose, timestamp=1.0)
         result = analyzer.analyze(pose, timestamp=3.2)
         self.assertEqual(result.status, "severe_warning")
+
+    def test_low_confidence_hips_can_still_trigger_trunk_warning(self) -> None:
+        analyzer = PostureAnalyzer(self.config)
+        pose = make_pose(
+            nose=(0.74, 0.27),
+            left_shoulder=(0.55, 0.46),
+            right_shoulder=(0.71, 0.46),
+            left_hip=(0.43, 0.70),
+            right_hip=(0.57, 0.70),
+            hip_visibility=0.25,
+        )
+        early = analyzer.analyze(pose, timestamp=1.0)
+        late = analyzer.analyze(pose, timestamp=4.2)
+        self.assertEqual(early.status, "normal")
+        self.assertEqual(late.status, "trunk_flex_warning")
+        self.assertIsNotNone(late.smoothed_trunk_angle_deg)
+
+    def test_calibrated_upper_body_proxy_triggers_when_hips_are_missing(self) -> None:
+        config = self.config.copy()
+        config["trunk_mode"] = "upper_body_proxy"
+        config["upper_body_calibration_sec"] = 1.0
+        config["upper_body_min_samples"] = 2
+        config["upper_body_severe_score"] = 101
+        config["head_down_warning_deg"] = 90
+        config["head_down_severe_deg"] = 120
+        analyzer = PostureAnalyzer(config)
+        analyzer.start_calibration(timestamp=0.0)
+
+        normal_pose = make_pose(hip_visibility=0.0)
+        calibrating = analyzer.analyze(normal_pose, timestamp=0.2)
+        calibrated = analyzer.analyze(normal_pose, timestamp=1.2)
+        self.assertEqual(calibrating.status, "calibrating")
+        self.assertTrue(calibrated.calibrated)
+
+        flex_pose = make_pose(
+            nose=(0.65, 0.39),
+            left_shoulder=(0.42, 0.45),
+            right_shoulder=(0.58, 0.45),
+            hip_visibility=0.0,
+        )
+        early = analyzer.analyze(flex_pose, timestamp=2.0)
+        late = analyzer.analyze(flex_pose, timestamp=5.2)
+        self.assertEqual(early.status, "normal")
+        self.assertEqual(late.status, "trunk_flex_warning")
+        self.assertEqual(late.trunk_signal, "upper_body_score")
+        self.assertIsNotNone(late.smoothed_upper_body_score)
 
     def test_low_confidence_is_invalid(self) -> None:
         analyzer = PostureAnalyzer(self.config)

@@ -49,6 +49,12 @@ USB 摄像头：
 .\.venv\Scripts\python.exe main.py --source-type usb --camera-id 0
 ```
 
+启动后自动校准上半身伏案基准：
+
+```powershell
+.\.venv\Scripts\python.exe main.py --source-type usb --camera-id 0 --calibrate-on-start
+```
+
 RTSP 视频流：
 
 ```powershell
@@ -67,7 +73,7 @@ RTSP 视频流：
 .\.venv\Scripts\python.exe main.py --no-window --video-file "data/videos/sample.mp4" --max-frames 100
 ```
 
-OpenCV 窗口中按 `q` 或 `Esc` 退出。
+OpenCV 窗口中按 `q` 或 `Esc` 退出，按 `c` 重新开始上半身校准。校准时请保持正常坐姿 8 秒左右。
 
 ## 配置说明
 
@@ -75,13 +81,21 @@ OpenCV 窗口中按 `q` 或 `Esc` 退出。
 
 - `video_source`：视频源类型、摄像头编号、RTSP 地址、本地视频路径、分辨率、目标帧率和重连策略。
 - `pose`：MediaPipe 置信度阈值、模型复杂度和关键点平滑开关。
-- `posture_rule`：低头角度阈值、躯干前倾角度阈值、平滑窗口、告警持续时间、严重告警持续时间和冷却时间。
+- `posture_rule`：低头角度阈值、躯干前倾角度阈值、髋部关键点专用置信度阈值、上半身伏案代理分数、校准时长、平滑窗口、告警持续时间、严重告警持续时间和冷却时间。
 - `visualization`：是否显示骨架、关键点、角度和窗口名称。
 - `logging`：是否启用日志、日志目录、日志格式和是否逐帧记录。
 
 ## 日志
 
-日志默认写入 `data/logs`，字段包括：
+日志默认写入 `data/logs`。
+
+逐帧日志文件名类似：
+
+```text
+posture_20260605_093000.csv
+```
+
+字段包括：
 
 - 时间
 - 视频源类型
@@ -94,6 +108,14 @@ OpenCV 窗口中按 `q` 或 `Esc` 退出。
 - 是否触发提醒
 - 关键点置信度
 - FPS
+
+低头、弯腰、联合风险、严重风险真正触发提醒时，会额外写入独立事件文件，文件名类似：
+
+```text
+posture_events_20260605_093000.csv
+```
+
+事件文件只记录触发瞬间，不记录每一帧。字段包括事件类型、姿态状态、提示文本、头部角度、躯干角度、异常持续时间、激活的规则标记、置信度和 FPS。
 
 系统默认只保存角度、状态和事件信息，不保存原始视频。
 
@@ -114,3 +136,5 @@ OpenCV 窗口中按 `q` 或 `Esc` 退出。
 ## 注意事项
 
 本项目是学习姿态提醒工具，不是医学诊断系统。检测结果适合用于行为提醒和规则调试，实际部署前需要根据摄像头角度、桌椅高度、学生坐姿习惯和光照条件重新校准阈值。
+
+边缘部署和性能优化建议见：[docs/边缘计算优化建议.md](docs/边缘计算优化建议.md)。

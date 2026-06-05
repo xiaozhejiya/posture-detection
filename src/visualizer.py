@@ -62,15 +62,21 @@ class Visualizer:
     ) -> None:
         panel_x, panel_y = 16, 16
         line_height = 26
+        trunk_text = self._angle_text(analysis.smoothed_trunk_angle_deg)
+        upper_body_text = self._score_text(analysis.smoothed_upper_body_score)
+        if analysis.trunk_signal == "upper_body_score" and upper_body_text != "N/A":
+            trunk_text = "proxy"
         rows = [
             ("Status", analysis.status),
             ("Head angle", self._angle_text(analysis.smoothed_head_angle_deg)),
-            ("Trunk angle", self._angle_text(analysis.smoothed_trunk_angle_deg)),
+            ("Trunk angle", trunk_text),
+            ("Upper score", upper_body_text),
             ("Head duration", f"{analysis.head_warning_duration_sec:.1f}s"),
             ("Trunk duration", f"{analysis.trunk_warning_duration_sec:.1f}s"),
+            ("Calibration", self._calibration_text(analysis)),
             ("FPS", f"{fps:.1f}"),
         ]
-        panel_width = 360
+        panel_width = 410
         panel_height = line_height * len(rows) + 22
         cv2.rectangle(
             frame,
@@ -110,12 +116,27 @@ class Visualizer:
         return f"{value:.1f} deg"
 
     @staticmethod
+    def _score_text(value: Optional[float]) -> str:
+        if value is None:
+            return "N/A"
+        return f"{value:.1f}"
+
+    @staticmethod
+    def _calibration_text(analysis: PostureAnalysis) -> str:
+        if analysis.calibrating:
+            return f"{analysis.calibration_progress * 100:.0f}% ({analysis.calibration_sample_count})"
+        if analysis.calibrated:
+            return "ready"
+        return "not ready"
+
+    @staticmethod
     def _status_color(status: str) -> Tuple[int, int, int]:
         if status == "normal":
             return (80, 220, 120)
         if status == "invalid":
             return (180, 180, 180)
+        if status == "calibrating":
+            return (0, 210, 255)
         if status == "severe_warning":
             return (0, 0, 255)
         return (0, 165, 255)
-
