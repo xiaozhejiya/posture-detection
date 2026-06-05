@@ -1,0 +1,8 @@
+.venv/
+.harbor/
+__pycache__/
+*.py[cod]
+data/logs/*.csv
+data/logs/*.jsonl
+data/videos/*
+!data/videos/.gitkeep

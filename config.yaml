@@ -1,0 +1,57 @@
+app:
+  name: "Posture Detection MVP"
+  debug: true
+  show_window: true
+
+video_source:
+  type: "usb"
+  camera_id: 0
+  rtsp_url: ""
+  video_file: ""
+  width: 1280
+  height: 720
+  target_fps: 15
+  reconnect: true
+  reconnect_interval_sec: 2.0
+  show_raw: true
+
+pose:
+  backend: "mediapipe"
+  model_asset_path: "models/pose_landmarker_lite.task"
+  model_complexity: 1
+  min_detection_confidence: 0.5
+  min_pose_presence_confidence: 0.5
+  min_tracking_confidence: 0.5
+  smooth_landmarks: true
+  use_face_landmarker: false
+
+posture_rule:
+  min_visibility: 0.5
+  head_expected_gap_ratio: 0.55
+
+  head_down_mild_deg: 15
+  head_down_warning_deg: 25
+  head_down_severe_deg: 35
+
+  trunk_flex_mild_deg: 15
+  trunk_flex_warning_deg: 25
+  trunk_flex_severe_deg: 35
+
+  smoothing_window_sec: 1.0
+  warning_duration_sec: 3.0
+  severe_duration_sec: 2.0
+  combined_severe_duration_sec: 5.0
+  cooldown_sec: 10.0
+
+visualization:
+  show_skeleton: true
+  show_landmarks: true
+  show_angles: true
+  window_name: "Posture Detection MVP"
+
+logging:
+  enable: true
+  save_raw_video: false
+  log_dir: "data/logs"
+  format: "csv"
+  write_each_frame: true

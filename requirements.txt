@@ -1,0 +1,19 @@
+# Recommended Python: 3.11.x on Windows 10/11 x64
+# Purpose: RTSP/USB camera + MediaPipe Pose/Face + local posture-rule prototype
+
+# Core vision / pose stack
+mediapipe==0.10.35
+opencv-contrib-python==4.12.0.88
+numpy==2.2.6
+
+# Utilities for angle calculation, config, logging and debugging
+scipy==1.16.0
+PyYAML==6.0.2
+loguru==0.7.3
+tqdm==4.67.1
+
+# Optional: local plotting/debug visualization
+matplotlib==3.10.3
+
+# Optional: future ONNX/RTMPose testing on Windows CPU
+onnxruntime==1.26.0
