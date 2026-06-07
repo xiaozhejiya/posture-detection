@@ -4,5 +4,7 @@ __pycache__/
 *.py[cod]
 data/logs/*.csv
 data/logs/*.jsonl
+logs/*
+!logs/.gitkeep
 data/videos/*
 !data/videos/.gitkeep

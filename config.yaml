@@ -66,8 +66,9 @@ visualization:
 logging:
   enable: true
   save_raw_video: false
-  log_dir: "data/logs"
+  log_dir: "logs"
   format: "csv"
+  max_file_size_mb: 10
   write_each_frame: true
   enable_event_log: true
   event_log_prefix: "posture_events"

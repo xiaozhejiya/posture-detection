@@ -73,8 +73,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "logging": {
         "enable": True,
         "save_raw_video": False,
-        "log_dir": "data/logs",
+        "log_dir": "logs",
         "format": "csv",
+        "max_file_size_mb": 10,
         "write_each_frame": True,
         "enable_event_log": True,
         "event_log_prefix": "posture_events",

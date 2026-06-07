@@ -85,7 +85,9 @@ class PostureLoggerTest(unittest.TestCase):
             )
             logger.close()
 
-            event_files = list(Path(temp_dir).glob("posture_events_*.csv"))
+            event_dirs = list(Path(temp_dir).glob("posture_events_*"))
+            self.assertEqual(len(event_dirs), 1)
+            event_files = list(event_dirs[0].glob("posture_events_*.csv"))
             self.assertEqual(len(event_files), 1)
 
             with event_files[0].open("r", encoding="utf-8", newline="") as file:
@@ -132,7 +134,9 @@ class PostureLoggerTest(unittest.TestCase):
                 logger.write(pose, analysis, alert, fps=10.0)
             logger.close()
 
-            event_files = list(Path(temp_dir).glob("posture_events_*.csv"))
+            event_dirs = list(Path(temp_dir).glob("posture_events_*"))
+            self.assertEqual(len(event_dirs), 1)
+            event_files = list(event_dirs[0].glob("posture_events_*.csv"))
             self.assertEqual(len(event_files), 1)
 
             with event_files[0].open("r", encoding="utf-8", newline="") as file:
@@ -141,6 +145,54 @@ class PostureLoggerTest(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["event_type"], "trunk_flex")
             self.assertEqual(rows[0]["status"], "trunk_flex_warning")
+
+    def test_logs_are_split_into_run_directories_by_size(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            logger = PostureLogger(
+                {
+                    "enable": True,
+                    "log_dir": temp_dir,
+                    "format": "csv",
+                    "write_each_frame": True,
+                    "enable_event_log": True,
+                    "event_log_prefix": "posture_events",
+                    "max_file_size_mb": 0.001,
+                },
+                {"type": "usb"},
+            )
+            warning = PostureAnalysis(
+                timestamp=4.5,
+                valid=True,
+                status="head_down_warning",
+                head_angle_deg=31.2,
+                smoothed_head_angle_deg=31.2,
+                head_warning_duration_sec=3.2,
+                confidence=0.88,
+                detected=True,
+                flags={"head_warning": True},
+                message="Head-down posture detected",
+            )
+
+            for index in range(30):
+                timestamp = 4.5 + index
+                logger.write(
+                    PoseResult(valid=True),
+                    warning,
+                    AlertEvent(True, "head_down_warning", "Head-down posture detected", timestamp),
+                    fps=14.7,
+                )
+            logger.close()
+
+            posture_dirs = [
+                path
+                for path in Path(temp_dir).glob("posture_*")
+                if path.is_dir() and not path.name.startswith("posture_events_")
+            ]
+            event_dirs = list(Path(temp_dir).glob("posture_events_*"))
+            self.assertEqual(len(posture_dirs), 1)
+            self.assertEqual(len(event_dirs), 1)
+            self.assertGreater(len(list(posture_dirs[0].glob("posture_*.csv"))), 1)
+            self.assertGreater(len(list(event_dirs[0].glob("posture_events_*.csv"))), 1)
 
 
 if __name__ == "__main__":

@@ -21,30 +21,31 @@ class PostureLogger:
         self.writer: Optional[csv.DictWriter] = None
         self.event_file: Optional[TextIO] = None
         self.event_writer: Optional[csv.DictWriter] = None
+        self.file_index = 0
+        self.event_file_index = 0
+        self.rotate_file = False
+        self.rotate_event_file = False
+        self.max_file_size_bytes = int(float(config.get("max_file_size_mb", 10.0)) * 1024 * 1024)
+        self.max_file_size_bytes = max(1, self.max_file_size_bytes)
 
         if not self.enabled:
             return
 
-        log_dir = Path(str(config.get("log_dir", "data/logs")))
-        log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir = Path(str(config.get("log_dir", "logs")))
+        self.log_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         suffix = "jsonl" if self.format == "jsonl" else "csv"
-        self.path = log_dir / f"posture_{stamp}.{suffix}"
-        self.file = self.path.open("a", encoding="utf-8", newline="")
+        self.suffix = suffix
+        self.posture_dir = self.log_dir / f"posture_{stamp}"
+        self.posture_dir.mkdir(parents=True, exist_ok=True)
+        self._open_posture_file()
 
-        if suffix == "csv":
-            self.writer = csv.DictWriter(self.file, fieldnames=list(self._empty_row().keys()))
-            self.writer.writeheader()
         if self.enable_event_log:
             event_prefix = str(config.get("event_log_prefix", "posture_events"))
-            self.event_path = log_dir / f"{event_prefix}_{stamp}.{suffix}"
-            self.event_file = self.event_path.open("a", encoding="utf-8", newline="")
-            if suffix == "csv":
-                self.event_writer = csv.DictWriter(
-                    self.event_file,
-                    fieldnames=list(self._empty_event_row().keys()),
-                )
-                self.event_writer.writeheader()
+            self.event_prefix = event_prefix
+            self.event_dir = self.log_dir / f"{event_prefix}_{stamp}"
+            self.event_dir.mkdir(parents=True, exist_ok=True)
+            self._open_event_file()
 
     def write(
         self,
@@ -56,20 +57,26 @@ class PostureLogger:
         if not self.enabled:
             return
         if self.file is not None and (self.write_each_frame or alert.triggered):
+            if self.rotate_file:
+                self._open_posture_file()
             row = self._row(pose_result, analysis, alert, fps)
             if self.writer is not None:
                 self.writer.writerow(row)
             else:
                 self.file.write(json.dumps(row, ensure_ascii=False) + "\n")
             self.file.flush()
+            self.rotate_file = self.file.tell() >= self.max_file_size_bytes
 
         if self.event_file is not None and self._should_write_event(analysis, alert):
+            if self.rotate_event_file:
+                self._open_event_file()
             event_row = self._event_row(analysis, alert, fps)
             if self.event_writer is not None:
                 self.event_writer.writerow(event_row)
             else:
                 self.event_file.write(json.dumps(event_row, ensure_ascii=False) + "\n")
             self.event_file.flush()
+            self.rotate_event_file = self.event_file.tell() >= self.max_file_size_bytes
 
     def close(self) -> None:
         if self.file is not None:
@@ -78,6 +85,35 @@ class PostureLogger:
         if self.event_file is not None:
             self.event_file.close()
             self.event_file = None
+
+    def _open_posture_file(self) -> None:
+        if self.file is not None:
+            self.file.close()
+        self.file_index += 1
+        self.path = self.posture_dir / f"posture_{self.file_index:04d}.{self.suffix}"
+        self.file = self.path.open("a", encoding="utf-8", newline="")
+        self.writer = None
+        if self.suffix == "csv":
+            self.writer = csv.DictWriter(self.file, fieldnames=list(self._empty_row().keys()))
+            self.writer.writeheader()
+            self.file.flush()
+        self.rotate_file = False
+
+    def _open_event_file(self) -> None:
+        if self.event_file is not None:
+            self.event_file.close()
+        self.event_file_index += 1
+        self.event_path = self.event_dir / f"{self.event_prefix}_{self.event_file_index:04d}.{self.suffix}"
+        self.event_file = self.event_path.open("a", encoding="utf-8", newline="")
+        self.event_writer = None
+        if self.suffix == "csv":
+            self.event_writer = csv.DictWriter(
+                self.event_file,
+                fieldnames=list(self._empty_event_row().keys()),
+            )
+            self.event_writer.writeheader()
+            self.event_file.flush()
+        self.rotate_event_file = False
 
     def _empty_row(self) -> Dict[str, Any]:
         return {
