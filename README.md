@@ -1,11 +1,11 @@
 # 学生伏案写作业姿态检测 MVP
 
-这是一个本地运行的学生学习姿态检测原型，支持 USB 摄像头、RTSP 视频流和本地视频文件输入。系统通过 MediaPipe 提取人体关键点，再基于几何角度和持续时间规则判断低头、弯腰/躯干前倾等姿态风险。
+这是一个本地运行的学生学习姿态检测原型，支持 USB 摄像头、RTSP 视频流和本地视频文件输入。系统通过 MoveNet TFLite 提取人体关键点，再基于几何角度、正常坐姿校准和持续时间规则判断低头、伏案/躯干前倾等姿态风险。
 
 ## 已实现功能
 
 - 支持 `usb`、`rtsp`、`file` 三类视频源。
-- 使用 MediaPipe Pose 提取人体 33 点关键点。
+- 使用 MoveNet SinglePose Thunder TFLite 提取人体 17 点关键点，并映射为项目内部姿态点结构。
 - 计算头部低头角度和躯干前倾角度。
 - 使用滑动平滑窗口和连续持续时间过滤，避免单帧误报。
 - 在 OpenCV 窗口中显示骨架、角度、姿态状态、提醒状态和 FPS。
@@ -29,17 +29,29 @@ uv pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-当前环境中的 MediaPipe 使用新版 `tasks` API，需要 Pose Landmarker `.task` 模型文件。默认路径为：
+树莓派 5 / Linux ARM64：
+
+```bash
+uv venv --python 3.11
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+如果 OpenCV 的 pip wheel 安装失败，可改用系统包安装 OpenCV，再用 `uv pip install` 安装其余依赖。
+
+当前姿态估计后端使用 MoveNet SinglePose Thunder INT8 TFLite 模型。默认路径为：
 
 ```text
-models/pose_landmarker_lite.task
+models/movenet_thunder_int8.tflite
 ```
 
 如果该文件缺失，可手动下载：
 
 ```text
-https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
+https://tfhub.dev/google/lite-model/movenet/singlepose/thunder/tflite/int8/4?lite-format=tflite
 ```
+
+Thunder 的关键点稳定性通常好于 Lightning，但推理更慢。树莓派 5 建议使用 `tflite-runtime` 执行 `.tflite` 模型。Windows 调试环境如果没有 `tflite-runtime` wheel，可安装 `ai-edge-litert`，代码会自动回退到 `ai_edge_litert.Interpreter`。
 
 ## 运行方式
 
@@ -80,7 +92,7 @@ OpenCV 窗口中按 `q` 或 `Esc` 退出，按 `c` 重新开始上半身校准�
 主要参数在 `config.yaml` 中调整：
 
 - `video_source`：视频源类型、摄像头编号、RTSP 地址、本地视频路径、分辨率、目标帧率和重连策略。
-- `pose`：MediaPipe 置信度阈值、模型复杂度和关键点平滑开关。
+- `pose`：MoveNet TFLite 模型路径、关键点置信度阈值和推理线程数。
 - `posture_rule`：低头角度阈值、躯干前倾角度阈值、髋部关键点专用置信度阈值、上半身伏案代理分数、校准时长、平滑窗口、告警持续时间、严重告警持续时间和冷却时间。
 - `visualization`：是否显示骨架、关键点、角度和窗口名称。
 - `logging`：是否启用日志、日志目录、日志格式和是否逐帧记录。

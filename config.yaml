@@ -17,14 +17,12 @@ video_source:
   show_raw: true
 
 pose:
-  backend: "mediapipe"
-  model_asset_path: "models/pose_landmarker_lite.task"
-  model_complexity: 1
-  min_detection_confidence: 0.5
-  min_pose_presence_confidence: 0.5
-  min_tracking_confidence: 0.5
-  smooth_landmarks: true
-  use_face_landmarker: false
+  backend: "movenet_tflite"
+  model_asset_path: "models/movenet_thunder_int8.tflite"
+  model_variant: "thunder"
+  input_size: 256
+  min_keypoint_score: 0.3
+  num_threads: 4
 
 posture_rule:
   trunk_mode: "auto"
@@ -56,6 +54,7 @@ posture_rule:
   warning_duration_sec: 3.0
   severe_duration_sec: 2.0
   combined_severe_duration_sec: 5.0
+  missing_signal_grace_sec: 1.0
   cooldown_sec: 10.0
 
 visualization:

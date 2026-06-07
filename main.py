@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from src.alert_system import AlertSystem
 from src.config_loader import load_config
 from src.logger import PostureLogger
-from src.pose_estimator import MediaPipePoseEstimator
+from src.pose_estimator import MoveNetTFLiteEstimator
 from src.posture_analyzer import PostureAnalyzer
 from src.video_source import VideoSource
 from src.visualizer import Visualizer
@@ -73,7 +73,7 @@ def main() -> int:
         raise RuntimeError("opencv-python is not installed. Install requirements.txt first.")
 
     source = VideoSource(config["video_source"])
-    estimator = MediaPipePoseEstimator(config["pose"])
+    estimator = MoveNetTFLiteEstimator(config["pose"])
     analyzer = PostureAnalyzer(config["posture_rule"])
     alerts = AlertSystem(config["posture_rule"])
     logger = PostureLogger(config["logging"], config["video_source"])
