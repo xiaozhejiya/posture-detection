@@ -21,6 +21,7 @@ class PostureAnalyzer:
         self.trunk_angle_samples: Deque[Tuple[float, float]] = deque()
         self.upper_body_samples: Deque[Tuple[float, float]] = deque()
         self.active_since: Dict[str, float] = {}
+        self.missing_since: Dict[str, float] = {}
 
         self.calibration_started_at: Optional[float] = None
         self.calibration_samples: List[FeatureMap] = []
@@ -42,6 +43,7 @@ class PostureAnalyzer:
         self.trunk_angle_samples.clear()
         self.upper_body_samples.clear()
         self.active_since.clear()
+        self.missing_since.clear()
 
     def analyze(self, pose_result: PoseResult, timestamp: float) -> PostureAnalysis:
         if not pose_result.valid or len(pose_result.landmarks) < 25:
@@ -57,7 +59,6 @@ class PostureAnalyzer:
             return self._handle_calibration(metrics, pose_result, timestamp)
 
         upper_body_score = self._upper_body_score(metrics["upper_features"])
-        trunk_value, trunk_signal = self._select_trunk_signal(metrics["trunk_angle"], upper_body_score)
 
         if metrics["head_angle"] is not None:
             self.head_samples.append((timestamp, metrics["head_angle"]))
@@ -71,16 +72,15 @@ class PostureAnalyzer:
         trunk_angle_smoothed = self._average(value for _, value in self.trunk_angle_samples)
         upper_body_smoothed = self._average(value for _, value in self.upper_body_samples)
 
-        if trunk_signal == "hip_angle":
-            trunk_for_flags = trunk_angle_smoothed
-        elif trunk_signal == "upper_body_score":
-            trunk_for_flags = upper_body_smoothed
-        else:
-            trunk_for_flags = None
+        trunk_for_flags, trunk_signal = self._select_trunk_signal(
+            trunk_angle_smoothed,
+            upper_body_smoothed,
+        )
 
         flags = self._build_flags(head_smoothed, trunk_for_flags, trunk_signal)
-        durations = self._update_durations(flags, timestamp)
-        status = self._status_from_flags(flags, durations)
+        signal_known = self._build_signal_known(head_smoothed, trunk_for_flags, flags)
+        durations, effective_flags = self._update_durations(flags, signal_known, timestamp)
+        status = self._status_from_flags(effective_flags, durations)
 
         return PostureAnalysis(
             timestamp=timestamp,
@@ -100,7 +100,7 @@ class PostureAnalyzer:
             calibrated=self.is_calibrated,
             calibration_sample_count=len(self.calibration_samples),
             trunk_signal=trunk_signal,
-            flags=flags,
+            flags=effective_flags,
             message=self._message_for_status(status),
         )
 
@@ -193,6 +193,7 @@ class PostureAnalyzer:
             self.upper_body_baseline = self._average_features(self.calibration_samples)
             self.calibration_started_at = None
             self.active_since.clear()
+            self.missing_since.clear()
             self.head_samples.clear()
             self.trunk_angle_samples.clear()
             self.upper_body_samples.clear()
@@ -245,6 +246,12 @@ class PostureAnalyzer:
             return trunk_angle, "hip_angle" if trunk_angle is not None else "none"
         if self.trunk_mode == "upper_body_proxy":
             return upper_body_score, "upper_body_score" if upper_body_score is not None else "none"
+        if trunk_angle is not None and upper_body_score is not None:
+            hip_ratio = trunk_angle / max(float(self.config["trunk_flex_warning_deg"]), 1e-9)
+            upper_ratio = upper_body_score / max(float(self.config.get("upper_body_warning_score", 60)), 1e-9)
+            if upper_ratio > hip_ratio:
+                return upper_body_score, "upper_body_score"
+            return trunk_angle, "hip_angle"
         if trunk_angle is not None:
             return trunk_angle, "hip_angle"
         if upper_body_score is not None:
@@ -287,7 +294,36 @@ class PostureAnalyzer:
             "hip_based_trunk": trunk_signal == "hip_angle",
         }
 
-    def _update_durations(self, flags: Dict[str, bool], timestamp: float) -> Dict[str, float]:
+    @staticmethod
+    def _build_signal_known(
+        head_angle: Optional[float],
+        trunk_value: Optional[float],
+        flags: Dict[str, bool],
+    ) -> Dict[str, bool]:
+        head_known = head_angle is not None
+        trunk_known = trunk_value is not None
+        combined_known = (
+            head_known
+            and trunk_known
+            or head_known
+            and not flags["head_warning"]
+            or trunk_known
+            and not flags["trunk_warning"]
+        )
+        return {
+            "head_warning": head_known,
+            "head_severe": head_known,
+            "trunk_warning": trunk_known,
+            "trunk_severe": trunk_known,
+            "combined_warning": combined_known,
+        }
+
+    def _update_durations(
+        self,
+        flags: Dict[str, bool],
+        signal_known: Dict[str, bool],
+        timestamp: float,
+    ) -> Tuple[Dict[str, float], Dict[str, bool]]:
         tracked = (
             "head_warning",
             "head_severe",
@@ -295,15 +331,34 @@ class PostureAnalyzer:
             "trunk_severe",
             "combined_warning",
         )
+        grace_sec = max(0.0, float(self.config.get("missing_signal_grace_sec", 1.0)))
         durations: Dict[str, float] = {}
+        effective_flags = flags.copy()
         for name in tracked:
+            if not signal_known.get(name, True):
+                if name in self.active_since:
+                    missing_start = self.missing_since.setdefault(name, timestamp)
+                    missing_elapsed = timestamp - missing_start
+                    if missing_elapsed <= grace_sec:
+                        effective_flags[name] = True
+                        durations[name] = max(0.0, missing_start - self.active_since[name])
+                        continue
+                self.active_since.pop(name, None)
+                self.missing_since.pop(name, None)
+                effective_flags[name] = False
+                durations[name] = 0.0
+                continue
+
+            missing_start = self.missing_since.pop(name, None)
             if flags[name]:
+                if missing_start is not None and name in self.active_since:
+                    self.active_since[name] += max(0.0, timestamp - missing_start)
                 self.active_since.setdefault(name, timestamp)
                 durations[name] = timestamp - self.active_since[name]
             else:
                 self.active_since.pop(name, None)
                 durations[name] = 0.0
-        return durations
+        return durations, effective_flags
 
     def _status_from_flags(self, flags: Dict[str, bool], durations: Dict[str, float]) -> str:
         warning_duration = float(self.config.get("warning_duration_sec", 3.0))
@@ -338,16 +393,36 @@ class PostureAnalyzer:
             self.upper_body_samples.popleft()
 
     def _invalid(self, timestamp: float, pose_result: PoseResult, reason: str) -> PostureAnalysis:
-        self.active_since.clear()
+        flags = {
+            "head_warning": False,
+            "head_severe": False,
+            "trunk_warning": False,
+            "trunk_severe": False,
+            "combined_warning": False,
+            "upper_body_proxy": False,
+            "hip_based_trunk": False,
+        }
+        signal_known = {
+            "head_warning": False,
+            "head_severe": False,
+            "trunk_warning": False,
+            "trunk_severe": False,
+            "combined_warning": False,
+        }
+        durations, effective_flags = self._update_durations(flags, signal_known, timestamp)
         return PostureAnalysis(
             timestamp=timestamp,
             valid=False,
             status="invalid",
+            head_warning_duration_sec=durations["head_warning"],
+            trunk_warning_duration_sec=durations["trunk_warning"],
+            combined_warning_duration_sec=durations["combined_warning"],
             confidence=pose_result.min_visibility,
             detected=pose_result.valid,
             calibrated=self.is_calibrated,
             calibrating=self.is_calibrating,
             calibration_sample_count=len(self.calibration_samples),
+            flags=effective_flags,
             message=reason,
         )
 
@@ -560,4 +635,3 @@ class PostureAnalyzer:
             "invalid": "Invalid pose",
         }
         return messages.get(status, status)
-

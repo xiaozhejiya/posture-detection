@@ -29,6 +29,10 @@ def make_pose(
     return PoseResult(landmarks=landmarks, valid=True, min_visibility=0.99)
 
 
+def make_invalid_pose(reason: str = "no person detected") -> PoseResult:
+    return PoseResult(valid=False, reason=reason, min_visibility=0.0)
+
+
 class PostureAnalyzerTest(unittest.TestCase):
     def setUp(self) -> None:
         self.config = DEFAULT_CONFIG["posture_rule"].copy()
@@ -63,6 +67,122 @@ class PostureAnalyzerTest(unittest.TestCase):
         analyzer.analyze(pose, timestamp=1.0)
         result = analyzer.analyze(pose, timestamp=3.2)
         self.assertEqual(result.status, "severe_warning")
+
+    def test_missing_trunk_angle_does_not_restart_timer_within_grace(self) -> None:
+        config = self.config.copy()
+        config["trunk_mode"] = "hip_based"
+        config["smoothing_window_sec"] = 0.1
+        config["missing_signal_grace_sec"] = 1.0
+        config["head_down_warning_deg"] = 90
+        config["head_down_severe_deg"] = 120
+        analyzer = PostureAnalyzer(config)
+        flex_pose = make_pose(
+            nose=(0.70, 0.35),
+            left_shoulder=(0.62, 0.46),
+            right_shoulder=(0.78, 0.46),
+            left_hip=(0.43, 0.70),
+            right_hip=(0.57, 0.70),
+        )
+        missing_trunk_pose = make_pose(
+            nose=(0.70, 0.35),
+            left_shoulder=(0.62, 0.46),
+            right_shoulder=(0.78, 0.46),
+            left_hip=(0.43, 0.70),
+            right_hip=(0.57, 0.70),
+            hip_visibility=0.0,
+        )
+
+        analyzer.analyze(flex_pose, timestamp=1.0)
+        analyzer.analyze(flex_pose, timestamp=1.8)
+        missing = analyzer.analyze(missing_trunk_pose, timestamp=2.1)
+        resumed = analyzer.analyze(flex_pose, timestamp=2.4)
+
+        self.assertIsNone(missing.smoothed_trunk_angle_deg)
+        self.assertGreater(missing.trunk_warning_duration_sec, 1.0)
+        self.assertGreater(resumed.trunk_warning_duration_sec, 1.0)
+
+    def test_missing_trunk_angle_resets_timer_after_grace(self) -> None:
+        config = self.config.copy()
+        config["trunk_mode"] = "hip_based"
+        config["smoothing_window_sec"] = 0.1
+        config["missing_signal_grace_sec"] = 0.5
+        config["head_down_warning_deg"] = 90
+        config["head_down_severe_deg"] = 120
+        analyzer = PostureAnalyzer(config)
+        flex_pose = make_pose(
+            nose=(0.70, 0.35),
+            left_shoulder=(0.62, 0.46),
+            right_shoulder=(0.78, 0.46),
+            left_hip=(0.43, 0.70),
+            right_hip=(0.57, 0.70),
+        )
+        missing_trunk_pose = make_pose(
+            nose=(0.70, 0.35),
+            left_shoulder=(0.62, 0.46),
+            right_shoulder=(0.78, 0.46),
+            left_hip=(0.43, 0.70),
+            right_hip=(0.57, 0.70),
+            hip_visibility=0.0,
+        )
+
+        analyzer.analyze(flex_pose, timestamp=1.0)
+        analyzer.analyze(flex_pose, timestamp=1.8)
+        analyzer.analyze(missing_trunk_pose, timestamp=2.1)
+        reset = analyzer.analyze(missing_trunk_pose, timestamp=2.7)
+        resumed = analyzer.analyze(flex_pose, timestamp=2.8)
+
+        self.assertEqual(reset.trunk_warning_duration_sec, 0.0)
+        self.assertEqual(resumed.trunk_warning_duration_sec, 0.0)
+
+    def test_invalid_pose_does_not_restart_timer_within_grace(self) -> None:
+        config = self.config.copy()
+        config["trunk_mode"] = "hip_based"
+        config["smoothing_window_sec"] = 0.1
+        config["missing_signal_grace_sec"] = 1.0
+        config["head_down_warning_deg"] = 90
+        config["head_down_severe_deg"] = 120
+        analyzer = PostureAnalyzer(config)
+        flex_pose = make_pose(
+            nose=(0.70, 0.35),
+            left_shoulder=(0.62, 0.46),
+            right_shoulder=(0.78, 0.46),
+            left_hip=(0.43, 0.70),
+            right_hip=(0.57, 0.70),
+        )
+
+        analyzer.analyze(flex_pose, timestamp=1.0)
+        analyzer.analyze(flex_pose, timestamp=1.8)
+        invalid = analyzer.analyze(make_invalid_pose(), timestamp=2.1)
+        resumed = analyzer.analyze(flex_pose, timestamp=2.4)
+
+        self.assertEqual(invalid.status, "invalid")
+        self.assertGreater(invalid.trunk_warning_duration_sec, 0.7)
+        self.assertGreater(resumed.trunk_warning_duration_sec, 0.7)
+
+    def test_invalid_pose_resets_timer_after_grace(self) -> None:
+        config = self.config.copy()
+        config["trunk_mode"] = "hip_based"
+        config["smoothing_window_sec"] = 0.1
+        config["missing_signal_grace_sec"] = 0.5
+        config["head_down_warning_deg"] = 90
+        config["head_down_severe_deg"] = 120
+        analyzer = PostureAnalyzer(config)
+        flex_pose = make_pose(
+            nose=(0.70, 0.35),
+            left_shoulder=(0.62, 0.46),
+            right_shoulder=(0.78, 0.46),
+            left_hip=(0.43, 0.70),
+            right_hip=(0.57, 0.70),
+        )
+
+        analyzer.analyze(flex_pose, timestamp=1.0)
+        analyzer.analyze(flex_pose, timestamp=1.8)
+        analyzer.analyze(make_invalid_pose(), timestamp=2.1)
+        reset = analyzer.analyze(make_invalid_pose(), timestamp=2.7)
+        resumed = analyzer.analyze(flex_pose, timestamp=2.8)
+
+        self.assertEqual(reset.trunk_warning_duration_sec, 0.0)
+        self.assertEqual(resumed.trunk_warning_duration_sec, 0.0)
 
     def test_low_confidence_hips_can_still_trigger_trunk_warning(self) -> None:
         analyzer = PostureAnalyzer(self.config)
@@ -109,6 +229,39 @@ class PostureAnalyzerTest(unittest.TestCase):
         self.assertEqual(late.status, "trunk_flex_warning")
         self.assertEqual(late.trunk_signal, "upper_body_score")
         self.assertIsNotNone(late.smoothed_upper_body_score)
+
+    def test_auto_mode_prefers_upper_body_proxy_when_hips_look_normal(self) -> None:
+        config = self.config.copy()
+        config["trunk_mode"] = "auto"
+        config["upper_body_calibration_sec"] = 1.0
+        config["upper_body_min_samples"] = 2
+        config["upper_body_severe_score"] = 101
+        config["head_down_warning_deg"] = 90
+        config["head_down_severe_deg"] = 120
+        analyzer = PostureAnalyzer(config)
+        analyzer.start_calibration(timestamp=0.0)
+
+        normal_pose = make_pose()
+        analyzer.analyze(normal_pose, timestamp=0.2)
+        calibrated = analyzer.analyze(normal_pose, timestamp=1.2)
+        self.assertTrue(calibrated.calibrated)
+
+        flex_pose = make_pose(
+            nose=(0.65, 0.39),
+            left_shoulder=(0.42, 0.45),
+            right_shoulder=(0.58, 0.45),
+            left_hip=(0.43, 0.70),
+            right_hip=(0.57, 0.70),
+            hip_visibility=0.99,
+        )
+        early = analyzer.analyze(flex_pose, timestamp=2.0)
+        late = analyzer.analyze(flex_pose, timestamp=5.2)
+
+        self.assertEqual(early.status, "normal")
+        self.assertEqual(late.status, "trunk_flex_warning")
+        self.assertEqual(late.trunk_signal, "upper_body_score")
+        self.assertIsNotNone(late.smoothed_upper_body_score)
+        self.assertLess(late.smoothed_trunk_angle_deg or 0.0, config["trunk_flex_warning_deg"])
 
     def test_low_confidence_is_invalid(self) -> None:
         analyzer = PostureAnalyzer(self.config)

@@ -5,8 +5,34 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.alert_system import AlertSystem
+from src.config_loader import DEFAULT_CONFIG
 from src.logger import PostureLogger
-from src.models import AlertEvent, PoseResult, PostureAnalysis
+from src.models import AlertEvent, Landmark, PoseIndex, PoseResult, PostureAnalysis
+from src.posture_analyzer import PostureAnalyzer
+
+
+def make_pose(
+    nose=(0.70, 0.35),
+    left_shoulder=(0.62, 0.46),
+    right_shoulder=(0.78, 0.46),
+    left_hip=(0.43, 0.70),
+    right_hip=(0.57, 0.70),
+) -> PoseResult:
+    landmarks = [Landmark(0.0, 0.0, visibility=0.0) for _ in range(33)]
+    for index, point in (
+        (PoseIndex.NOSE, nose),
+        (PoseIndex.LEFT_SHOULDER, left_shoulder),
+        (PoseIndex.RIGHT_SHOULDER, right_shoulder),
+        (PoseIndex.LEFT_HIP, left_hip),
+        (PoseIndex.RIGHT_HIP, right_hip),
+    ):
+        landmarks[index] = Landmark(point[0], point[1], visibility=0.99)
+    return PoseResult(landmarks=landmarks, valid=True, min_visibility=0.99)
+
+
+def make_invalid_pose() -> PoseResult:
+    return PoseResult(valid=False, reason="no person detected", min_visibility=0.0)
 
 
 class PostureLoggerTest(unittest.TestCase):
@@ -70,7 +96,52 @@ class PostureLoggerTest(unittest.TestCase):
             self.assertEqual(rows[0]["status"], "head_down_warning")
             self.assertEqual(rows[0]["head_warning_duration_sec"], "3.20")
 
+    def test_event_is_written_after_short_invalid_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rule_config = DEFAULT_CONFIG["posture_rule"].copy()
+            rule_config["trunk_mode"] = "hip_based"
+            rule_config["smoothing_window_sec"] = 0.1
+            rule_config["missing_signal_grace_sec"] = 1.0
+            rule_config["warning_duration_sec"] = 1.0
+            rule_config["trunk_flex_severe_deg"] = 120
+            rule_config["head_down_warning_deg"] = 90
+            rule_config["head_down_severe_deg"] = 120
+            analyzer = PostureAnalyzer(rule_config)
+            alerts = AlertSystem(rule_config)
+            logger = PostureLogger(
+                {
+                    "enable": True,
+                    "log_dir": temp_dir,
+                    "format": "csv",
+                    "write_each_frame": False,
+                    "enable_event_log": True,
+                    "event_log_prefix": "posture_events",
+                },
+                {"type": "usb"},
+            )
+
+            for pose, timestamp in (
+                (make_pose(), 1.0),
+                (make_pose(), 1.2),
+                (make_invalid_pose(), 1.4),
+                (make_pose(), 2.0),
+                (make_pose(), 2.6),
+            ):
+                analysis = analyzer.analyze(pose, timestamp=timestamp)
+                alert = alerts.update(analysis)
+                logger.write(pose, analysis, alert, fps=10.0)
+            logger.close()
+
+            event_files = list(Path(temp_dir).glob("posture_events_*.csv"))
+            self.assertEqual(len(event_files), 1)
+
+            with event_files[0].open("r", encoding="utf-8", newline="") as file:
+                rows = list(csv.DictReader(file))
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["event_type"], "trunk_flex")
+            self.assertEqual(rows[0]["status"], "trunk_flex_warning")
+
 
 if __name__ == "__main__":
     unittest.main()
-
