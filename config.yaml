@@ -62,6 +62,14 @@ visualization:
   show_landmarks: true
   show_angles: true
   window_name: "Posture Detection MVP"
+  fullscreen: true
+  window_width: 800
+  window_height: 480
+
+calibration:
+  enable_persistence: true
+  file_path: "data/calibration/default.json"
+  auto_start_if_missing: true
 
 logging:
   enable: true

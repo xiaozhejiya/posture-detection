@@ -69,6 +69,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "show_landmarks": True,
         "show_angles": True,
         "window_name": "Posture Detection MVP",
+        "fullscreen": True,
+        "window_width": 800,
+        "window_height": 480,
+    },
+    "calibration": {
+        "enable_persistence": True,
+        "file_path": "data/calibration/default.json",
+        "auto_start_if_missing": True,
     },
     "logging": {
         "enable": True,

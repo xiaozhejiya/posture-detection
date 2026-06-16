@@ -16,6 +16,19 @@ class ConfigLoaderTest(unittest.TestCase):
         self.assertEqual(pose["model_variant"], "thunder")
         self.assertEqual(pose["input_size"], 256)
 
+    def test_missing_config_includes_display_and_calibration_defaults(self) -> None:
+        config = load_config(Path("missing-config.yaml"))
+
+        visualization = config["visualization"]
+        self.assertTrue(visualization["fullscreen"])
+        self.assertEqual(visualization["window_width"], 800)
+        self.assertEqual(visualization["window_height"], 480)
+
+        calibration = config["calibration"]
+        self.assertTrue(calibration["enable_persistence"])
+        self.assertEqual(calibration["file_path"], "data/calibration/default.json")
+        self.assertTrue(calibration["auto_start_if_missing"])
+
 
 if __name__ == "__main__":
     unittest.main()
