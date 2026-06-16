@@ -1,37 +1,38 @@
-# Raspberry Pi Fullscreen Autostart And Calibration Design
+# 树莓派全屏自启动与校准持久化设计
 
-## Context
+## 背景
 
-The project currently runs posture detection from `main.py`, reads configuration through `src/config_loader.py`, displays the live frame with OpenCV in `src/visualizer.py`, and supports startup calibration with `--calibrate-on-start`. Raspberry Pi 5 deployment will boot directly into the graphical desktop. A small screen must show the live detection view full screen after boot.
+当前项目通过 `main.py` 运行姿态检测，通过 `src/config_loader.py` 读取配置，通过 `src/visualizer.py` 使用 OpenCV 显示实时画面，并且已经支持 `--calibrate-on-start` 启动时校准。树莓派 5 部署环境会在开机后自动进入图形化桌面，小屏幕需要全屏实时显示检测画面。
 
-The first deployment is for one fixed student and one fixed camera position. It only needs one default calibration profile.
+第一版部署场景是固定一个学生、固定一个摄像头机位，因此只需要一份默认校准档案。
 
-## Goals
+## 目标
 
-- Start posture detection automatically after the Raspberry Pi desktop session is available.
-- Display the OpenCV detection window full screen on the small screen.
-- Avoid requiring an 8 second calibration on every reboot when a valid saved calibration exists.
-- Keep manual recalibration available from the running window.
-- Keep the implementation compatible with current Windows/local test workflows.
+- 树莓派进入桌面会话后自动启动姿态检测程序。
+- OpenCV 检测窗口在小屏幕上全屏显示。
+- 有有效校准文件时，重启后不再强制等待 8 秒校准。
+- 运行过程中仍然可以手动重新校准。
+- 保持现有 Windows 和本地调试流程可用。
 
-## Non-Goals
+## 非目标
 
-- Multi-student profile management.
-- Camera-position detection or automatic invalidation of stale calibration.
-- A new GUI toolkit, kiosk browser, or system-level display manager integration.
-- A systemd-based service for the first version.
+- 多学生档案管理。
+- 多摄像头机位管理。
+- 自动识别摄像头位置变化并让旧校准失效。
+- 替换为新的 GUI 框架、浏览器 kiosk 或系统级显示管理方案。
+- 第一版不采用 systemd 服务作为图形程序的启动方式。
 
-## Recommended Approach
+## 推荐方案
 
-Use Raspberry Pi desktop autostart plus OpenCV full-screen display.
+采用“树莓派桌面 autostart + OpenCV 全屏窗口”。
 
-The desktop session will launch a project-owned shell script through a `.desktop` file in `~/.config/autostart/`. The shell script enters the project directory, activates `.venv`, and starts `main.py`. This avoids the common display-environment problems of system-level services while matching the known boot flow: the device automatically enters the graphical desktop.
+树莓派进入图形化桌面后，由桌面会话通过 `~/.config/autostart/` 下的 `.desktop` 文件启动项目脚本。启动脚本进入项目目录、激活 `.venv`，再运行 `main.py`。这个方案与当前已确认的开机流程一致，也能避开 systemd 启动图形窗口时常见的 `DISPLAY`、`XDG_RUNTIME_DIR` 等环境变量问题。
 
-## Code Design
+## 代码设计
 
-### Display Configuration
+### 显示配置
 
-Add visualization settings to `config.yaml` and `DEFAULT_CONFIG`:
+在 `config.yaml` 和 `src/config_loader.py` 的 `DEFAULT_CONFIG` 中给 `visualization` 增加配置：
 
 ```yaml
 visualization:
@@ -40,19 +41,19 @@ visualization:
   window_height: 480
 ```
 
-`main.py` will create the OpenCV window before the loop when `show_window` is enabled. If `visualization.fullscreen` is true, it will set `cv2.WND_PROP_FULLSCREEN` to `cv2.WINDOW_FULLSCREEN`. If false, it will size the normal window using `window_width` and `window_height` when both are positive.
+`main.py` 在 `show_window` 启用时提前创建 OpenCV 窗口。如果 `visualization.fullscreen` 为 `true`，则通过 `cv2.WND_PROP_FULLSCREEN` 和 `cv2.WINDOW_FULLSCREEN` 设置全屏。如果为 `false`，则在 `window_width` 和 `window_height` 都为正数时按配置设置普通窗口大小。
 
-`Visualizer.draw()` stays responsible only for drawing overlays. Window lifecycle remains in `main.py`.
+`Visualizer.draw()` 继续只负责绘制骨架、状态面板和告警条；窗口生命周期仍放在 `main.py`，避免显示逻辑和绘制逻辑混在一起。
 
-### Calibration Persistence
+### 校准持久化
 
-Create `src/calibration_store.py` with a focused JSON store:
+新增 `src/calibration_store.py`，负责读写一份默认 JSON 校准文件：
 
-- `CalibrationStore(path)` stores one default calibration file.
-- `load()` returns a calibration feature map when the file exists, has a supported schema version, and contains the required fields.
-- `save(baseline)` writes the current baseline atomically enough for local deployment by writing JSON to the configured path.
+- `CalibrationStore(path)`：管理一个校准文件路径。
+- `load()`：当文件存在、schema 版本支持、字段结构有效时，返回校准特征。
+- `save(baseline)`：把当前校准基准写入 JSON 文件。
 
-Add calibration settings:
+新增校准配置：
 
 ```yaml
 calibration:
@@ -61,7 +62,7 @@ calibration:
   auto_start_if_missing: true
 ```
 
-The saved JSON contains:
+保存的 JSON 结构如下：
 
 ```json
 {
@@ -80,76 +81,82 @@ The saved JSON contains:
 }
 ```
 
-The feature names match `PostureAnalyzer.upper_body_baseline`, so the analyzer does not need a second calibration model.
+字段名与 `PostureAnalyzer.upper_body_baseline` 保持一致，因此不需要引入第二套校准模型。
 
-### Startup Behavior
+### 启动行为
 
-On startup:
+程序启动时按以下顺序处理：
 
-1. Load configuration.
-2. Create `PostureAnalyzer`.
-3. If calibration persistence is enabled, try to load `calibration.file_path`.
-4. If a valid baseline exists, inject it into the analyzer and skip startup calibration.
-5. If no valid baseline exists and `--calibrate-on-start` or `calibration.auto_start_if_missing` is true, start calibration.
-6. When calibration completes, save `analyzer.upper_body_baseline`.
+1. 读取配置文件。
+2. 创建 `PostureAnalyzer`。
+3. 如果启用了校准持久化，尝试读取 `calibration.file_path`。
+4. 如果读取到有效校准基准，把它注入 `PostureAnalyzer`，并跳过启动校准。
+5. 如果没有有效校准基准，并且传入了 `--calibrate-on-start` 或 `calibration.auto_start_if_missing` 为 `true`，则自动开始校准。
+6. 当校准完成后，把 `analyzer.upper_body_baseline` 保存到校准文件。
 
-Add command-line controls:
+新增命令行参数：
 
-- `--force-calibration`: ignore saved calibration and run calibration on startup.
-- `--no-calibration-persistence`: do not load or save calibration data for this run.
+- `--force-calibration`：忽略已有校准文件，启动后强制重新校准。
+- `--no-calibration-persistence`：本次运行不读取也不保存校准文件。
 
-The existing `c` key starts recalibration. After recalibration completes, the new baseline overwrites `data/calibration/default.json`.
+现有 `c` 按键继续用于手动重新校准。手动校准完成后，新基准会覆盖 `data/calibration/default.json`。
 
-## Deployment Design
+## 部署设计
 
-Create `scripts/raspi/start_posture_detection.sh`:
+新增 `scripts/raspi/start_posture_detection.sh`：
 
-- Determine the project root.
-- Create `logs/` if needed.
-- Activate `.venv`.
-- Run `python main.py --source-type usb --camera-id 0 --calibrate-on-start`.
-- Append stdout and stderr to `logs/runtime.log`.
+- 自动定位项目根目录。
+- 确保 `logs/` 目录存在。
+- 激活 `.venv`。
+- 运行 `python main.py --source-type usb --camera-id 0 --calibrate-on-start`。
+- 将标准输出和错误输出追加到 `logs/runtime.log`，方便排查开机启动问题。
 
-Create `scripts/raspi/posture-detection.desktop`:
+新增 `scripts/raspi/posture-detection.desktop` 模板：
 
-- `Type=Application`
-- `Name=Posture Detection`
-- `Exec=/home/pi/posture-detection/scripts/raspi/start_posture_detection.sh`
-- `Terminal=false`
-- `X-GNOME-Autostart-enabled=true`
+```ini
+Type=Application
+Name=Posture Detection
+Exec=/home/pi/posture-detection/scripts/raspi/start_posture_detection.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true
+```
 
-The documentation will instruct the user to edit the project path if the repository is not located at `/home/pi/posture-detection`, then copy the desktop file to `~/.config/autostart/`.
+部署文档会说明：如果项目不在 `/home/pi/posture-detection`，需要先修改 `.desktop` 里的 `Exec` 路径，然后复制到：
 
-## Error Handling
+```bash
+~/.config/autostart/posture-detection.desktop
+```
 
-- If calibration JSON is missing, startup continues and calibration begins.
-- If calibration JSON is malformed or uses an unsupported schema version, startup prints a warning and calibration begins.
-- If saving calibration fails, posture detection keeps running and prints a warning.
-- If OpenCV cannot open the camera, the program keeps its current failure behavior.
-- If the display session is not available, the desktop autostart entry will fail visibly through `logs/runtime.log`; this is documented as a deployment issue.
+## 错误处理
 
-## Testing
+- 校准 JSON 不存在时，程序继续启动并进入校准。
+- 校准 JSON 格式错误或 schema 版本不支持时，打印警告并进入校准。
+- 保存校准失败时，姿态检测继续运行并打印警告。
+- OpenCV 无法打开摄像头时，沿用当前程序的失败行为。
+- 如果桌面显示会话不可用，autostart 启动失败信息会通过 `logs/runtime.log` 暴露，部署文档会把它作为排查项。
 
-Unit tests will cover:
+## 测试设计
 
-- Calibration store returns `None` when the file does not exist.
-- Calibration store saves and reloads the expected baseline structure.
-- Calibration store rejects unsupported schema versions.
-- Config loader includes default visualization and calibration persistence values.
+单元测试覆盖：
 
-Existing analyzer tests already cover calibration completion and upper-body proxy scoring. The new integration behavior in `main.py` will stay small and use the tested store API.
+- 校准文件不存在时，`CalibrationStore.load()` 返回 `None`。
+- 校准基准保存后可以重新读取，并且结构符合预期。
+- 不支持的 schema 版本会被拒绝。
+- 配置加载器包含默认的全屏显示和校准持久化配置。
 
-Manual Raspberry Pi validation:
+现有 `PostureAnalyzer` 测试已经覆盖校准完成和上半身代理分数判断。`main.py` 里的新增集成逻辑保持轻量，只依赖已测试的 `CalibrationStore` 接口。
 
-- Run the startup script from a terminal and confirm the window goes full screen.
-- Press `c`, complete calibration, and confirm `data/calibration/default.json` is written.
-- Reboot and confirm startup skips the 8 second calibration when the saved file exists.
-- Delete the calibration file, reboot, and confirm calibration starts automatically.
+树莓派人工验收：
 
-## Acceptance Criteria
+- 在终端手动运行启动脚本，确认窗口全屏。
+- 按 `c` 重新校准，确认完成后写入 `data/calibration/default.json`。
+- 重启树莓派，确认存在有效校准文件时跳过 8 秒启动校准。
+- 删除校准文件后重启，确认会自动进入校准。
 
-- Raspberry Pi boots into desktop and automatically starts posture detection.
-- The detection view is full screen on the small display.
-- A valid saved calibration skips automatic startup calibration.
-- Manual recalibration with `c` updates the saved calibration.
-- Local unit tests and compile checks pass.
+## 验收标准
+
+- 树莓派开机进入桌面后自动启动姿态检测。
+- 检测画面在小屏幕上全屏显示。
+- 存在有效校准文件时，重启后跳过自动校准。
+- 按 `c` 手动重新校准后会更新校准文件。
+- 本地单元测试和语法检查通过。
