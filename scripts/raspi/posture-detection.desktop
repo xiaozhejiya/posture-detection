@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Posture Detection
+Comment=Start posture detection in fullscreen mode
+Exec=/home/pi/posture-detection/scripts/raspi/start_posture_detection.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true

@@ -8,3 +8,5 @@ logs/*
 !logs/.gitkeep
 data/videos/*
 !data/videos/.gitkeep
+data/calibration/*.json
+!data/calibration/.gitkeep

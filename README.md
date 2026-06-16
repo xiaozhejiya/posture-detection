@@ -39,6 +39,8 @@ uv pip install -r requirements.txt
 
 如果 OpenCV 的 pip wheel 安装失败，可改用系统包安装 OpenCV，再用 `uv pip install` 安装其余依赖。
 
+树莓派开机自启动、小屏全屏显示和校准持久化部署步骤见：[docs/树莓派开机自启动部署.md](docs/树莓派开机自启动部署.md)。
+
 当前姿态估计后端使用 MoveNet SinglePose Thunder INT8 TFLite 模型。默认路径为：
 
 ```text
