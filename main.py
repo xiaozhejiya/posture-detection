@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from src.alert_system import AlertSystem
 from src.config_loader import load_config
+from src.display_window import configure_display_window
 from src.logger import PostureLogger
 from src.pose_estimator import MoveNetTFLiteEstimator
 from src.posture_analyzer import PostureAnalyzer
@@ -82,6 +83,8 @@ def main() -> int:
 
     frame_count = 0
     window_name = str(config["visualization"].get("window_name", config["app"].get("name", "Posture")))
+    if show_window and cv2 is not None:
+        configure_display_window(cv2, window_name, config["visualization"])
 
     try:
         source.open()
