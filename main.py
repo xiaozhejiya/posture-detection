@@ -5,6 +5,7 @@ import time
 from typing import Any, Dict, Optional
 
 from src.alert_system import AlertSystem
+from src.calibration_store import CalibrationStore
 from src.config_loader import load_config
 from src.display_window import configure_display_window
 from src.logger import PostureLogger
@@ -44,6 +45,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--video-file", help="Override local video file.")
     parser.add_argument("--no-window", action="store_true", help="Disable OpenCV display window.")
     parser.add_argument("--calibrate-on-start", action="store_true", help="Start upper-body calibration on startup.")
+    parser.add_argument("--force-calibration", action="store_true", help="Ignore saved calibration and calibrate on startup.")
+    parser.add_argument("--no-calibration-persistence", action="store_true", help="Disable calibration load/save for this run.")
     parser.add_argument("--max-frames", type=int, help="Stop after this many frames; useful for smoke tests.")
     return parser.parse_args()
 
@@ -65,6 +68,35 @@ def apply_overrides(config: Dict[str, Any], args: argparse.Namespace) -> Dict[st
     return config
 
 
+def load_saved_calibration(analyzer: PostureAnalyzer, store: Optional[CalibrationStore]) -> bool:
+    if store is None:
+        return False
+    baseline = store.load()
+    if baseline is None:
+        return False
+    analyzer.upper_body_baseline = baseline
+    return True
+
+
+def save_current_calibration(analyzer: PostureAnalyzer, store: Optional[CalibrationStore]) -> None:
+    if store is None or analyzer.upper_body_baseline is None:
+        return
+    store.save(analyzer.upper_body_baseline)
+
+
+def should_start_calibration(
+    saved_calibration_loaded: bool,
+    calibrate_requested: bool,
+    force_calibration: bool,
+    auto_start_if_missing: bool,
+) -> bool:
+    if force_calibration:
+        return True
+    if saved_calibration_loaded:
+        return False
+    return calibrate_requested or auto_start_if_missing
+
+
 def main() -> int:
     args = parse_args()
     config = apply_overrides(load_config(args.config), args)
@@ -80,6 +112,16 @@ def main() -> int:
     logger = PostureLogger(config["logging"], config["video_source"])
     visualizer = Visualizer(config["visualization"]) if show_window else None
     fps_meter = FpsMeter()
+    calibration_config = config.get("calibration", {})
+    calibration_store = None
+    if not args.no_calibration_persistence and bool(calibration_config.get("enable_persistence", True)):
+        calibration_store = CalibrationStore(str(calibration_config.get("file_path", "data/calibration/default.json")))
+
+    saved_calibration_loaded = False
+    if not args.force_calibration:
+        saved_calibration_loaded = load_saved_calibration(analyzer, calibration_store)
+        if saved_calibration_loaded:
+            print("[INFO] Loaded saved upper-body calibration.")
 
     frame_count = 0
     window_name = str(config["visualization"].get("window_name", config["app"].get("name", "Posture")))
@@ -88,7 +130,14 @@ def main() -> int:
 
     try:
         source.open()
-        if args.calibrate_on_start or bool(config["app"].get("calibrate_on_start", False)):
+        calibrate_requested = args.calibrate_on_start or bool(config["app"].get("calibrate_on_start", False))
+        auto_start_if_missing = bool(calibration_config.get("auto_start_if_missing", False))
+        if should_start_calibration(
+            saved_calibration_loaded=saved_calibration_loaded,
+            calibrate_requested=calibrate_requested,
+            force_calibration=args.force_calibration,
+            auto_start_if_missing=auto_start_if_missing,
+        ):
             analyzer.start_calibration(time.monotonic())
             print("[INFO] Upper-body calibration started. Keep a normal sitting posture.")
         while True:
@@ -100,7 +149,15 @@ def main() -> int:
                 continue
 
             pose_result = estimator.estimate(frame, timestamp)
+            was_calibrating = analyzer.is_calibrating
             analysis = analyzer.analyze(pose_result, timestamp)
+            if was_calibrating and analysis.calibrated and not analyzer.is_calibrating:
+                try:
+                    save_current_calibration(analyzer, calibration_store)
+                    if calibration_store is not None:
+                        print("[INFO] Upper-body calibration saved.")
+                except (OSError, ValueError) as exc:
+                    print(f"[WARN] Failed to save calibration: {exc}")
             alert = alerts.update(analysis)
             fps = fps_meter.tick(timestamp)
 
